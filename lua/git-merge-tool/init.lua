@@ -178,6 +178,24 @@ function M.accept_remote_changes()
 	M.list_all_conflits()
 end
 
+function M.accept_all_changes()
+	local item = M.get_current_conflit()
+	if not M.buf_comflits or not item then
+		return
+	end
+	local lines = item.local_change
+	for _, line in ipairs(item.remote_change) do
+		table.insert(lines, line)
+	end
+	vim.api.nvim_buf_set_lines(item.buf, item.lines[1] - 1, item.lines[2], false, lines)
+	vim.api.nvim_buf_call(item.buf, function()
+		vim.cmd("write")
+	end)
+	clean_namespaces(item)
+	remove_conflit(item)
+	M.list_all_conflits()
+end
+
 function M.list_all_conflits()
 	local files = M.get_list_merge_files()
 	---@type ConflitObj[]
@@ -242,9 +260,9 @@ function M.configm_merge()
 end
 
 function M.setup(opts)
-	local usekeymaps = opts.keymaps
 	M.keymapAcceptLocalChanges = ":GitMergeToolAcceptLocalChange"
 	M.keymapAcceptRemoteChanges = ":GitMergeToolAcceptRemoteChange"
+	M.keymapAcceptAllChanges = ":GitMergeToolAcceptAllChanges"
 	M.keymapLisAllConflits = ":GitMergeToolListAllConflicts"
 	M.keymapNextConflit = ":GitMergeToolToNextConflict"
 	M.keymapPrevConflit = ":GitMergeToolToPrevConflict"
@@ -257,13 +275,33 @@ function M.setup(opts)
 	end
 	vim.api.nvim_create_user_command(M.keymapAcceptLocalChanges:sub(2), M.accept_local_changes, {})
 	vim.api.nvim_create_user_command(M.keymapAcceptRemoteChanges:sub(2), M.accept_remote_changes, {})
+	vim.api.nvim_create_user_command(M.keymapAcceptAllChanges:sub(2), M.accept_all_changes, {})
 	vim.api.nvim_create_user_command(M.keymapLisAllConflits:sub(2), M.list_all_conflits, {})
 	vim.api.nvim_create_user_command(M.keymapNextConflit:sub(2), M.to_next_conflit, {})
 	vim.api.nvim_create_user_command(M.keymapPrevConflit:sub(2), M.to_prev_conflit, {})
 	vim.api.nvim_create_user_command(M.keymapConfirmMerge:sub(2), M.configm_merge, {})
 	if opts.keymaps then
-		M.keymapAcceptLocalChanges = opts.accept_local_changes or M.keymapAcceptLocalChanges
-		M.keymapAcceptRemoteChanges = opts.accept_remote_changes or M.keymapAcceptRemoteChanges
+		function set_keymap(keymap, command)
+			if keymap then
+				vim.api.nvim_set_keymap("n", keymap, command .. "<CR>", { silent = true })
+			end
+		end
+
+		set_keymap(opts.keymaps.accept_local_changes, M.keymapAcceptLocalChanges)
+		set_keymap(opts.keymaps.accept_remote_changes, M.keymapAcceptRemoteChanges)
+		set_keymap(opts.keymaps.accept_all_changes, M.keymapAcceptAllChanges)
+		set_keymap(opts.keymaps.lis_all_conflits, M.keymapLisAllConflits)
+		set_keymap(opts.keymaps.next_conflit, M.keymapNextConflit)
+		set_keymap(opts.keymaps.prev_conflit, M.keymapPrevConflit)
+		set_keymap(opts.keymaps.confirm_merge, M.keymapConfirmMerge)
+
+		M.keymapAcceptLocalChanges = opts.keymaps.accept_local_changes or M.keymapAcceptLocalChanges
+		M.keymapAcceptRemoteChanges = opts.keymaps.accept_remote_changes or M.keymapAcceptRemoteChanges
+		M.keymapAcceptAllChanges = opts.keymaps.accept_all_changes or M.keymapAcceptAllChanges
+		M.keymapLisAllConflits = opts.keymaps.lis_all_conflits or M.keymapLisAllConflits
+		M.keymapNextConflit = opts.keymaps.next_conflit or M.keymapNextConflit
+		M.keymapPrevConflit = opts.keymaps.prev_conflit or M.keymapPrevConflit
+		M.keymapConfirmMerge = opts.keymaps.confirm_merge or M.keymapConfirmMerge
 	end
 end
 
