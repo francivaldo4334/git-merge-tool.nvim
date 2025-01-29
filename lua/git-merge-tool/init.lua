@@ -7,16 +7,9 @@ local M = {}
 
 ---@type ConflitObj
 M.current_conflit = nil
-local function start_with(value, prefix)
-	if value:sub(1, #prefix) == prefix then
-		return true
-	end
-	return false
-end
 function M.run_command(command, callback)
 	local result = vim.fn.system(command)
 	if vim.v.shell_error == 0 then
-		vim.notify("Comando executado com sucesso: " .. command)
 		if callback then
 			callback(result)
 		end
@@ -33,22 +26,25 @@ function M.set_highlight()
 	local lineContentHead = nil
 	local lineContentBranch = nil
 	for i, line in ipairs(lines) do
-		if start_with(line, "<<<<<<< HEAD") then
+		if vim.startswith(line, "<<<<<<< HEAD") then
 			vim.api.nvim_buf_add_highlight(buf, -1, "DiffAdd", i - 1, 0, -1)
 			vim.diagnostic.set(vim.api.nvim_create_namespace("merge_conflit_" .. i), buf, {
 				{
 					lnum = i - 1,
 					col = 0,
 					severity = vim.diagnostic.severity.INFO,
-					message = string.format("(%s) Para aceitar alterações locais || (%s) Para aceitar alterações remotas",
-						M.keymapAcceptLocalChanges, M.keymapAcceptRemoteChanges),
+					message = string.format(
+						"(%s) Para aceitar alterações locais || (%s) Para aceitar alterações remotas",
+						M.keymapAcceptLocalChanges,
+						M.keymapAcceptRemoteChanges
+					),
 				},
 			})
 			lineContentHead = i
-		elseif start_with(line, "=======") then
+		elseif vim.startswith(line, "=======") then
 			lineContentHead = nil
 			lineContentBranch = i
-		elseif start_with(line, ">>>>>>>") then
+		elseif vim.startswith(line, ">>>>>>>") then
 			lineContentBranch = nil
 			vim.api.nvim_buf_add_highlight(buf, -1, "IncSearch", i - 1, 0, -1)
 		else
@@ -78,13 +74,13 @@ function M.get_conflits()
 	local initLine = nil
 	local endLine = nil
 	for i, line in ipairs(lines) do
-		if start_with(line, "<<<<<<< HEAD") then
+		if vim.startswith(line, "<<<<<<< HEAD") then
 			addLLine = true
 			initLine = i
-		elseif start_with(line, "=======") then
+		elseif vim.startswith(line, "=======") then
 			addLLine = false
 			addRLine = true
-		elseif start_with(line, ">>>>>>>") then
+		elseif vim.startswith(line, ">>>>>>>") then
 			addRLine = false
 			addComflit = true
 			endLine = i
@@ -136,51 +132,49 @@ function M.get_current_conflit()
 	end
 end
 
-function M.accept_local_changes()
-	if not M.buf_comflits then
-		return
+function remove_conflit(item)
+	for i, conflit in ipairs(M.buf_comflits) do
+		if conflit.lines[1] == item.lines[1] then
+			table.remove(M.buf_comflits, i)
+			break
+		end
 	end
-	local item = M.get_current_conflit()
-	if not item then
-		return
-	end
-	vim.api.nvim_buf_set_lines(item.buf, item.lines[1] - 1, item.lines[2], false, item.local_change)
+end
+
+function clean_namespaces(item)
 	local namespaces = vim.api.nvim_get_namespaces()
 	for id, ns in pairs(namespaces) do
 		if vim.startswith(id, "merge_conflit_") then
 			vim.diagnostic.reset(ns, item.buf)
 		end
 	end
-	for i, conflit in ipairs(M.buf_comflits) do
-		if conflit.lines[1] == item.lines[1] then
-			table.remove(M.buf_comflits, i)
-			break;
-		end
+end
+
+function M.accept_local_changes()
+	local item = M.get_current_conflit()
+	if not M.buf_comflits or not item then
+		return
 	end
+	vim.api.nvim_buf_set_lines(item.buf, item.lines[1] - 1, item.lines[2], false, item.local_change)
+	vim.api.nvim_buf_call(item.buf, function()
+		vim.cmd("write")
+	end)
+	clean_namespaces(item)
+	remove_conflit(item)
 	M.list_all_conflits()
 end
 
 function M.accept_remote_changes()
-	if not M.buf_comflits then
-		return
-	end
 	local item = M.get_current_conflit()
-	if not item then
+	if not M.buf_comflits or not item then
 		return
 	end
 	vim.api.nvim_buf_set_lines(item.buf, item.lines[1] - 1, item.lines[2], false, item.remote_change)
-	local namespaces = vim.api.nvim_get_namespaces()
-	for id, ns in pairs(namespaces) do
-		if vim.startswith(id, "merge_conflit_") then
-			vim.diagnostic.reset(ns, item.buf)
-		end
-	end
-	for i, conflit in ipairs(M.buf_comflits) do
-		if conflit.lines[1] == item.lines[1] then
-			table.remove(M.buf_comflits, i)
-			break;
-		end
-	end
+	vim.api.nvim_buf_call(item.buf, function()
+		vim.cmd("write")
+	end)
+	clean_namespaces(item)
+	remove_conflit(item)
 	M.list_all_conflits()
 end
 
@@ -212,9 +206,9 @@ function M.to_next_conflit()
 			if i + 1 > #M.buf_comflits then
 				M.current_conflit = M.buf_comflits[1]
 			else
-				M.current_conflit = M.buf_comflits[1 + i]
+				M.current_conflit = M.buf_comflits[i + 1]
 			end
-			break;
+			break
 		end
 	end
 	vim.api.nvim_set_current_buf(M.current_conflit.buf)
@@ -230,12 +224,21 @@ function M.to_prev_conflit()
 	end
 	for i, conflit in ipairs(M.buf_comflits) do
 		if conflit.lines[1] == M.current_conflit.lines[1] then
-			M.current_conflit = M.buf_comflits[i - 1]
-			break;
+			if i - 1 <= 0 then
+				M.current_conflit = M.buf_comflits[#M.buf_comflits]
+			else
+				M.current_conflit = M.buf_comflits[i - 1]
+			end
+			break
 		end
 	end
 	vim.api.nvim_set_current_buf(M.current_conflit.buf)
 	vim.api.nvim_win_set_cursor(0, { M.current_conflit.lines[1], 0 })
+end
+
+function M.configm_merge()
+	M.run_command("git add .")
+	M.run_command("git commit --no-edit")
 end
 
 function M.setup(opts)
@@ -245,17 +248,19 @@ function M.setup(opts)
 	M.keymapLisAllConflits = ":GitMergeToolListAllConflicts"
 	M.keymapNextConflit = ":GitMergeToolToNextConflict"
 	M.keymapPrevConflit = ":GitMergeToolToPrevConflict"
+	M.keymapConfirmMerge = ":GitMergeToolConfirmMerge"
 	if vim.fn.executable("git") == 0 then
 		vim.notify(
 			"git-commit-tool: Git não está instalado! Este plugin pode não funcionar corretamente.",
 			vim.log.levels.ERROR
 		)
 	end
-	vim.api.nvim_create_user_command(M.keymapAcceptLocalChanges:gsub("^:", ""), M.accept_local_changes, {})
-	vim.api.nvim_create_user_command(M.keymapAcceptRemoteChanges:gsub("^:", ""), M.accept_remote_changes, {})
-	vim.api.nvim_create_user_command(M.keymapLisAllConflits:gsub("^:", ""), M.list_all_conflits, {})
-	vim.api.nvim_create_user_command(M.keymapNextConflit:gsub("^:", ""), M.to_next_conflit, {})
-	vim.api.nvim_create_user_command(M.keymapPrevConflit:gsub("^:", ""), M.to_prev_conflit, {})
+	vim.api.nvim_create_user_command(M.keymapAcceptLocalChanges:sub(2), M.accept_local_changes, {})
+	vim.api.nvim_create_user_command(M.keymapAcceptRemoteChanges:sub(2), M.accept_remote_changes, {})
+	vim.api.nvim_create_user_command(M.keymapLisAllConflits:sub(2), M.list_all_conflits, {})
+	vim.api.nvim_create_user_command(M.keymapNextConflit:sub(2), M.to_next_conflit, {})
+	vim.api.nvim_create_user_command(M.keymapPrevConflit:sub(2), M.to_prev_conflit, {})
+	vim.api.nvim_create_user_command(M.keymapConfirmMerge:sub(2), M.configm_merge, {})
 	if opts.keymaps then
 		M.keymapAcceptLocalChanges = opts.accept_local_changes or M.keymapAcceptLocalChanges
 		M.keymapAcceptRemoteChanges = opts.accept_remote_changes or M.keymapAcceptRemoteChanges
