@@ -281,7 +281,7 @@ function M.setup(opts)
 	vim.api.nvim_create_user_command(M.keymapPrevConflit:sub(2), M.to_prev_conflit, {})
 	vim.api.nvim_create_user_command(M.keymapConfirmMerge:sub(2), M.configm_merge, {})
 	if opts.keymaps then
-		function set_keymap(keymap, command)
+		local function set_keymap(keymap, command)
 			if keymap then
 				vim.api.nvim_set_keymap("n", keymap, command .. "<CR>", { silent = true })
 			end
